@@ -22,12 +22,23 @@ interface ParseHlsResult {
   data: Playlist[] | Segment[] | string;
 }
 
+/**
+ * Auto-upgrade the quality variant in HLS URLs.
+ * Replaces index-f{n}-v with index-f1-v since f1 = highest quality.
+ * Works on both the manifest URL and individual segment URLs.
+ */
+function upgradeToF1(url: string): string {
+  return url.replace(/index-f(\d+)-v/g, "index-f1-v");
+}
+
 async function parseHls({
   hlsUrl,
   headers = {},
 }: ParseHlsOptions): Promise<ParseHlsResult> {
   try {
-    let url = new URL(hlsUrl);
+    // Auto-upgrade to f1 (best quality) before fetching
+    const upgradedUrl = upgradeToF1(hlsUrl);
+    let url = new URL(upgradedUrl);
 
     let response = await fetch(url.href, {
       headers: {
@@ -41,7 +52,7 @@ async function parseHls({
     parser.push(manifest);
     parser.end();
 
-    let path = hlsUrl;
+    let path = upgradedUrl;
 
     try {
       let pathBase = url.pathname.split("/");
@@ -64,9 +75,9 @@ async function parseHls({
               ? `${g.attributes.RESOLUTION.width}x${g.attributes.RESOLUTION.height}`
               : `MAYBE_AUDIO:${g.attributes.BANDWIDTH}`,
             bandwidth: g.attributes.BANDWIDTH,
-            uri: g.uri.startsWith("http")
-              ? g.uri
-              : base.replace("{{URL}}", g.uri),
+            uri: upgradeToF1(
+              g.uri.startsWith("http") ? g.uri : base.replace("{{URL}}", g.uri)
+            ),
           } as Playlist;
         })
         .filter((g: Playlist | null) => g);
@@ -79,7 +90,9 @@ async function parseHls({
       let segments = parser.manifest.segments;
       segments = segments.map((s: any) => ({
         ...s,
-        uri: s.uri.startsWith("http") ? s.uri : base.replace("{{URL}}", s.uri),
+        uri: upgradeToF1(
+          s.uri.startsWith("http") ? s.uri : base.replace("{{URL}}", s.uri)
+        ),
       }));
 
       return {
